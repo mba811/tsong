@@ -1,0 +1,10 @@
+gh-pages/
+wiki/wiki/
+/integrated-test/node_modules
+/integrated-test/screenshots
+npm-debug.log
+.DS_Store
+/resume/_site
+/wiki/_site
+.sass-cache
+/site/.jekyll-cache
