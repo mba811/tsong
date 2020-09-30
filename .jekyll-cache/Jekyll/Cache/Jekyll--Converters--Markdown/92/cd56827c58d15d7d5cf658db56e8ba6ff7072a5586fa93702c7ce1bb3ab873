@@ -1,0 +1,256 @@
+I"�I<h1 id="这是什么">这是什么？</h1>
+
+<p>看板来源自日本，是丰田生产模式中的重要概念，用于流程管理<sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote">1</a></sup>。看板在生产线中主要分为两类：领取看板和生产看板。在学习单词时，我们也可以类比成：生词看板和已掌握单词看板。</p>
+
+<p>在互联网产品的项目管理领域，也有很多借助看板概念的工具，比如 Trello。而我做的就是一个看板风格的背单词工具，可以看作是 Trello 上的两个 kanban，或一个分为生词和已背单词列表的 Wunderlist。</p>
+
+<p>所以，这是一个单词本，由生词和已掌握单词单词两个看板组成。它还有这些 features：</p>
+
+<ul>
+  <li>简单易用</li>
+  <li>默认展示英文，悬浮会展示中文解释</li>
+  <li>可点击跳转到更加精准的英英词典</li>
+  <li>具有 API，可与 <a href="https://workflow.is/">Workflow</a> 等进行整合</li>
+</ul>
+
+<h2 id="tldr">tl;dr</h2>
+
+<p>先 show 出来：</p>
+
+<p><img src="/image/wk-main.png" alt="" /></p>
+
+<ul>
+  <li>体验：<a href="https://word-kanban.herokuapp.com/">https://word-kanban.herokuapp.com/</a></li>
+  <li>GitHub：<a href="https://github.com/crispgm/word-kanban">https://github.com/crispgm/word-kanban</a></li>
+</ul>
+
+<h1 id="技术方案">技术方案</h1>
+
+<p>之前在个人项目中，我使用 Rails 作为后端，Node.js 代理加上 Preact 作为前端，并且部署在 Heroku。详细请参考 <a href="/page/isomorphic-react-preact-with-heroku.html">Isomorphic React/Preact with Heroku</a>。</p>
+
+<p>这次也基本如此，不过索性把 Rails 也换成 Node.js。</p>
+
+<p>前后端基础部分的 Setup 工作（Webpack 配置、Express 等）完全来自其中：<a href="https://github.com/rugby-board/rugby-board-node">rugby-board/rugby-board-node</a>。</p>
+
+<h2 id="后端">后端</h2>
+
+<h3 id="orm">ORM</h3>
+
+<p>全 Node.js 方案就需要一个数据库 ORM 层，我<del>随机</del>选择了 <a href="http://docs.sequelizejs.com/">Sequelize</a>。</p>
+
+<p>先安装包，这里我是用 Postgres。</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nv">$ </span>yarn add sequelize
+<span class="nv">$ </span>yarn add pg pg-hstore
+</code></pre></div></div>
+
+<p>初始化并创建 Migration：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ yarn add sequelize-cli
+$ cd server
+$ ../node_modules/.bin/sequelize init
+$ ../node_modules/.bin/sequelize model:generate --name Words --attributes text:string,userId:string,status:integer
+</code></pre></div></div>
+
+<p>运行 Migration：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ ../node_modules/.bin/sequelize db:migrate
+</code></pre></div></div>
+
+<p>对于 DB 的操作就不细说了，看文档就好。</p>
+
+<h3 id="auth0">Auth0</h3>
+
+<p>用户系统是个比较麻烦的东西，涉及用户信息保存、校验、权限验证和 Cookie 保存等。我没有选择自己实现一套完整的用户系统，而是选择了基于 <a href="https://jwt.io/">JSON Web Token</a> 的 <a href="https://auth0.com/">Auth0</a> 用户认证服务。</p>
+
+<p>Auth0 是 Serverless 时代十分有用且强大的工具，无需自己建立后端就可以拥有强大的用户系统。除去基本的注册、登陆和权限校验流程，还可以一键集成第三方登陆系统，甚至提供 <a href="https://en.wikipedia.org/wiki/Multi-factor_authentication">Multi-factor authentication</a> 等高级安全功能。</p>
+
+<p>这是部分它支持的第三方登陆，国内的有百度、人人和微博，稍微有些匪夷所思。这里我选择 GitHub 和 Twitter。</p>
+
+<p><img src="/image/auth0-connections.png" alt="" /></p>
+
+<p>它还提供了丰富的基于实际框架的示例，我就是基于它提供的基于 <a href="https://auth0.com/docs/architecture-scenarios/application/spa-api/api-implementation-nodejs">Express 的后端</a> 和 <a href="https://auth0.com/docs/quickstart/spa/react">SPA React 客户端</a>的 demo 开发。</p>
+
+<h3 id="express">Express</h3>
+
+<p>在 Express 中，创建一个中间件用于校验 JSON Web Token：</p>
+
+<div class="language-javascript highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">const</span> <span class="nx">jwt</span> <span class="o">=</span> <span class="nx">require</span><span class="p">(</span><span class="dl">'</span><span class="s1">express-jwt</span><span class="dl">'</span><span class="p">);</span>
+<span class="kd">const</span> <span class="nx">jwksRsa</span> <span class="o">=</span> <span class="nx">require</span><span class="p">(</span><span class="dl">'</span><span class="s1">jwks-rsa</span><span class="dl">'</span><span class="p">);</span>
+<span class="kd">const</span> <span class="nx">cors</span> <span class="o">=</span> <span class="nx">require</span><span class="p">(</span><span class="dl">'</span><span class="s1">cors</span><span class="dl">'</span><span class="p">);</span>
+
+<span class="kd">const</span> <span class="nx">checkJwt</span> <span class="o">=</span> <span class="nx">jwt</span><span class="p">({</span>
+  <span class="na">secret</span><span class="p">:</span> <span class="nx">jwksRsa</span><span class="p">.</span><span class="nx">expressJwtSecret</span><span class="p">({</span>
+    <span class="na">cache</span><span class="p">:</span> <span class="kc">true</span><span class="p">,</span>
+    <span class="na">rateLimit</span><span class="p">:</span> <span class="kc">true</span><span class="p">,</span>
+    <span class="na">jwksRequestsPerMinute</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span>
+    <span class="na">jwksUri</span><span class="p">:</span> <span class="dl">'</span><span class="s1">https://crispgm.au.auth0.com/.well-known/jwks.json</span><span class="dl">'</span><span class="p">,</span>
+  <span class="p">}),</span>
+  <span class="na">audience</span><span class="p">:</span> <span class="dl">'</span><span class="s1">api.word-kanban.words</span><span class="dl">'</span><span class="p">,</span>
+  <span class="na">issuer</span><span class="p">:</span> <span class="dl">'</span><span class="s1">https://crispgm.au.auth0.com/</span><span class="dl">'</span><span class="p">,</span>
+  <span class="na">algorithms</span><span class="p">:</span> <span class="p">[</span><span class="dl">'</span><span class="s1">RS256</span><span class="dl">'</span><span class="p">],</span>
+<span class="p">});</span>
+</code></pre></div></div>
+
+<p>在具体接口中引入中间件：</p>
+
+<div class="language-javascript highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nx">app</span><span class="p">.</span><span class="nx">post</span><span class="p">(</span><span class="dl">'</span><span class="s1">/word/create</span><span class="dl">'</span><span class="p">,</span> <span class="nx">checkJwt</span><span class="p">,</span> <span class="p">(</span><span class="nx">req</span><span class="p">,</span> <span class="nx">res</span><span class="p">)</span> <span class="o">=&gt;</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="nx">Word</span><span class="p">.</span><span class="nx">create</span><span class="p">(</span><span class="nx">req</span><span class="p">,</span> <span class="nx">res</span><span class="p">);</span>
+<span class="p">});</span>
+</code></pre></div></div>
+
+<h3 id="google-translate">Google Translate</h3>
+
+<p>前面的 features 中提到，要显示悬浮的单词的中文解释，这里引入 Google Translate API。记得把 Token 放在环境变量中。</p>
+
+<div class="language-javascript highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// token.js</span>
+<span class="kd">const</span> <span class="nx">GOOGLE_TRANSLATE_API_KEY</span> <span class="o">=</span> <span class="nx">process</span><span class="p">.</span><span class="nx">env</span><span class="p">.</span><span class="nx">GOOGLE_TRANSLATE_API_KEY</span><span class="p">;</span>
+</code></pre></div></div>
+
+<div class="language-javascript highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// translate.js</span>
+<span class="kd">const</span> <span class="nx">fetch</span> <span class="o">=</span> <span class="nx">require</span><span class="p">(</span><span class="dl">'</span><span class="s1">node-fetch</span><span class="dl">'</span><span class="p">);</span>
+<span class="kd">const</span> <span class="p">{</span> <span class="nx">GOOGLE_TRANSLATE_API_KEY</span> <span class="p">}</span> <span class="o">=</span> <span class="nx">require</span><span class="p">(</span><span class="dl">'</span><span class="s1">../token</span><span class="dl">'</span><span class="p">);</span>
+
+<span class="kd">function</span> <span class="nx">translate</span><span class="p">(</span><span class="nx">req</span><span class="p">,</span> <span class="nx">res</span><span class="p">)</span> <span class="p">{</span>
+  <span class="kd">const</span> <span class="nx">word</span> <span class="o">=</span> <span class="nx">req</span><span class="p">.</span><span class="nx">query</span><span class="p">.</span><span class="nx">word</span><span class="p">;</span>
+
+  <span class="kd">const</span> <span class="nx">input</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="na">q</span><span class="p">:</span> <span class="nx">word</span><span class="p">,</span>
+    <span class="na">source</span><span class="p">:</span> <span class="dl">'</span><span class="s1">en</span><span class="dl">'</span><span class="p">,</span>
+    <span class="na">target</span><span class="p">:</span> <span class="dl">'</span><span class="s1">zh</span><span class="dl">'</span><span class="p">,</span>
+    <span class="na">format</span><span class="p">:</span> <span class="dl">'</span><span class="s1">text</span><span class="dl">'</span><span class="p">,</span>
+  <span class="p">};</span>
+  <span class="kd">const</span> <span class="nx">url</span> <span class="o">=</span> <span class="s2">`https://translation.googleapis.com/language/translate/v2?key=</span><span class="p">${</span><span class="nx">GOOGLE_TRANSLATE_API_KEY</span><span class="p">}</span><span class="s2">`</span><span class="p">;</span>
+  <span class="nx">fetch</span><span class="p">(</span><span class="nx">url</span><span class="p">,</span> <span class="p">{</span> <span class="na">method</span><span class="p">:</span> <span class="dl">'</span><span class="s1">POST</span><span class="dl">'</span><span class="p">,</span> <span class="na">body</span><span class="p">:</span> <span class="nx">JSON</span><span class="p">.</span><span class="nx">stringify</span><span class="p">(</span><span class="nx">input</span><span class="p">)</span> <span class="p">}).</span><span class="nx">then</span><span class="p">(</span><span class="nx">response</span> <span class="o">=&gt;</span> <span class="nx">response</span><span class="p">.</span><span class="nx">json</span><span class="p">()).</span><span class="nx">then</span><span class="p">((</span><span class="nx">json</span><span class="p">)</span> <span class="o">=&gt;</span> <span class="p">{</span>
+    <span class="nx">res</span><span class="p">.</span><span class="nx">send</span><span class="p">(</span><span class="nx">json</span><span class="p">);</span>
+  <span class="p">});</span>
+<span class="p">}</span>
+
+<span class="nx">module</span><span class="p">.</span><span class="nx">exports</span> <span class="o">=</span> <span class="p">{</span>
+  <span class="nx">translate</span><span class="p">,</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<h3 id="api">API</h3>
+
+<p>为了实现跟 Workflow 等自动化工具的结合，得提供一套基础简单的 API 系统。</p>
+
+<p>使用私钥、用户ID和时间戳生成一个简单的 Token，存到数据库里：</p>
+
+<div class="language-javascript highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">const</span> <span class="nx">ts</span> <span class="o">=</span> <span class="o">+</span><span class="k">new</span> <span class="nb">Date</span><span class="p">();</span>
+<span class="kd">const</span> <span class="nx">token</span> <span class="o">=</span> <span class="nx">md5</span><span class="p">(</span><span class="s2">`</span><span class="p">${</span><span class="nx">TOKEN_PRIVATE_KEY</span><span class="p">}${</span><span class="nx">userId</span><span class="p">}${</span><span class="nx">ts</span><span class="p">}</span><span class="s2">`</span><span class="p">);</span>
+</code></pre></div></div>
+
+<p>这里是<a href="https://github.com/crispgm/word-kanban/blob/master/docs/integration.md">API 文档</a>。</p>
+
+<h2 id="前端">前端</h2>
+
+<p>前端部分则继续使用 Preact 和 preact-router，跟写 React 没什么区别。用户权限校验和用户信息页完全根据 Auth0 的 React demo：</p>
+<ul>
+  <li><a href="https://auth0.com/docs/quickstart/spa/react">React Login</a></li>
+  <li><a href="https://auth0.com/docs/quickstart/spa/react/02-user-profile">React User Profile</a></li>
+</ul>
+
+<p>不过有一个教训，就是没有使用状态管理（如：Redux/Mobx），导致组件间（<code class="language-plaintext highlighter-rouge">Kanban</code>, <code class="language-plaintext highlighter-rouge">WordList</code>, <code class="language-plaintext highlighter-rouge">WordItem</code>, <code class="language-plaintext highlighter-rouge">WordInput</code>）相互传递数据有些复杂。幸好只有两个列表，否则代码会不太好维护。</p>
+
+<h3 id="react-trend">React Trend</h3>
+
+<p>使用 Preact 的一大优势就是，在包体积小的前提下还能使用完全基于 React 的组件。</p>
+
+<p>在用户设置页，我希望展示用户动态的曲线，于是找到了 <a href="https://github.com/unsplash/react-trend">React Trend</a> 用于生成曲线。React Trend 是 <a href="https://unsplash.com/">Unsplash</a> 开源的一个 React 组件，用在 Unsplash 的用户统计展示页（比如我的 <a href="https://unsplash.com/@crispgm/stats">https://unsplash.com/@crispgm/stats</a>）。</p>
+
+<p><img src="/image/react-trend-on-unsplash.png" alt="" /></p>
+
+<p>这是个 React Component，我们需要用 <a href="https://github.com/developit/preact-compat">preact-compat</a> 来进行兼容。兼容的方式有很多，我选择在 Webpack 进行。</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>...
+  resolve: {
+    extensions: ['.js', '.jsx'],
+    alias: {
+      'react': 'preact-compat',
+      'react-dom': 'preact-compat',
+    },
+  },
+...
+</code></pre></div></div>
+
+<p>给上数据之后，React Trend 就可以正常绘制了。</p>
+
+<div class="language-javascript highlighter-rouge"><div class="highlight"><pre class="highlight"><code>  <span class="nx">render</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="p">(</span>
+      <span class="o">&lt;</span><span class="nx">div</span><span class="o">&gt;</span>
+        <span class="o">&lt;</span><span class="nx">Trend</span>
+          <span class="nx">data</span><span class="o">=</span><span class="p">{</span><span class="k">this</span><span class="p">.</span><span class="nx">props</span><span class="p">.</span><span class="nx">data</span><span class="p">}</span>
+          <span class="nx">height</span><span class="o">=</span><span class="p">{</span><span class="mi">50</span><span class="p">}</span>
+          <span class="nx">gradient</span><span class="o">=</span><span class="p">{[</span><span class="dl">'</span><span class="s1">#343a40</span><span class="dl">'</span><span class="p">,</span> <span class="dl">'</span><span class="s1">#e64980</span><span class="dl">'</span><span class="p">,</span> <span class="dl">'</span><span class="s1">#f03e3e</span><span class="dl">'</span><span class="p">]}</span>
+          <span class="nx">smooth</span>
+          <span class="nx">autoDraw</span>
+          <span class="nx">autoDrawDuration</span><span class="o">=</span><span class="p">{</span><span class="mi">3000</span><span class="p">}</span>
+          <span class="nx">autoDrawEasing</span><span class="o">=</span><span class="dl">"</span><span class="s2">ease-out</span><span class="dl">"</span>
+        <span class="o">/&gt;</span>
+      <span class="o">&lt;</span><span class="sr">/div</span><span class="err">&gt;
+</span>    <span class="p">);</span>
+  <span class="p">}</span>
+</code></pre></div></div>
+
+<p><img src="/image/word-kanban-react-trend.png" alt="" /></p>
+
+<h2 id="完成">完成</h2>
+
+<p>Auth0 跳转登陆：</p>
+
+<p><img src="/image/wk-login.png" alt="" /></p>
+
+<p>主界面：</p>
+
+<p><img src="/image/wk-main.png" alt="" /></p>
+
+<p>个人设置：</p>
+
+<p><img src="/image/wk-setting.png" alt="" /></p>
+
+<h1 id="加入-workflow">加入 Workflow</h1>
+
+<p>最后，我们使用 Word-kanban 的 API 创建一个可以从网页中摘录生词的 Workflow。</p>
+
+<p>创建一个 Share Extension 的 Workflow，选择一个好看的图标并取一个喜欢的名字，比如我的叫：「Send My Word」。</p>
+
+<p>依次加入动作：</p>
+
+<ul>
+  <li>Choose from List</li>
+  <li>URL
+    <ul>
+      <li>添加生词的 API 接口：<code class="language-plaintext highlighter-rouge">https://word-kanban.herokuapp.com/api/v1/word</code></li>
+    </ul>
+  </li>
+  <li>Get Contents from URL
+    <ul>
+      <li>选择 <code class="language-plaintext highlighter-rouge">POST</code> 请求，加入 <code class="language-plaintext highlighter-rouge">token</code> 和 <code class="language-plaintext highlighter-rouge">word</code>，<code class="language-plaintext highlighter-rouge">token</code> 在用户页面生成粘贴过来</li>
+    </ul>
+  </li>
+</ul>
+
+<p><img src="/image/send-my-word-workflow.jpg" alt="" /></p>
+
+<p>阅读一篇英文文章，然后选取一个不认识的单词，发送到 Word Kanban。</p>
+
+<p><img src="/image/send-to-word-kanban.gif" alt="" /></p>
+
+<h1 id="最后">最后</h1>
+
+<ul>
+  <li>欢迎体验：<a href="https://word-kanban.herokuapp.com/">https://word-kanban.herokuapp.com/</a></li>
+  <li>欢迎点赞：<a href="https://github.com/crispgm/word-kanban">https://github.com/crispgm/word-kanban</a></li>
+</ul>
+
+<hr />
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p><a href="https://zh.wikipedia.org/wiki/%E7%9C%8B%E6%9D%BF%E7%AE%A1%E7%90%86">看板管理</a> <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>
+:ET
